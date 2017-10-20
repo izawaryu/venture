@@ -1,6 +1,6 @@
 # Ryu Izawa
 # Written 2017-10-15
-# Last updated 2017-10-18
+# Last updated 2017-10-20
 
 # 
 # 
@@ -23,10 +23,10 @@ key = "&key=" + 'AIzaSyA_phpapSMniXBO2AfGjxp3ZfAD64wyh1s'	# Verdi
 save_location = './'
 Size = '448x448'
 FoV = '15'
-step_size = 0.0003
-search_radius = 0.001
+step_size = 0.0001
+search_radius = 0.007
 locations = []
-locations_limit = 300
+locations_limit = 1000
 
 
 
@@ -84,19 +84,25 @@ def some_point_to_relative_bearing(observer_position, observer_track, relative_b
     # return a pano in the direction of the relative bearing, the given distance away.
     # Return None if none exists.
 
+    steps = 1
+    new_point = None
+
     absolute_bearing = observer_track + relative_bearing
-    lat_increment = step_size * math.sin(absolute_bearing)
-    lon_increment = step_size * math.cos(absolute_bearing)
+    lat_increment = math.sin(absolute_bearing)
+    lon_increment = math.cos(absolute_bearing)
 
-    latitude_of_the_new_point = observer_position[2] + lat_increment
-    longitude_of_the_new_point = observer_position[3] + lon_increment
-    coordinates_of_the_new_point = ('{},{}'.format(latitude_of_the_new_point, longitude_of_the_new_point))
+    while new_point is None:
+        steps += 1
+        if steps > 9:
+            break
 
-    try:
+        latitude_of_the_new_point = observer_position[2] + (lat_increment * step_size * steps)
+        longitude_of_the_new_point = observer_position[3] + (lon_increment * step_size * steps)
+        coordinates_of_the_new_point = ('{},{}'.format(latitude_of_the_new_point, longitude_of_the_new_point))
         new_point = get_nearest_pano(coordinates_of_the_new_point)
-    except ValueError:
-        new_point = None
-        print('*** failure at continue_along_path({})'.format(coordinates_of_the_new_point))
+
+        if there_exists_a_new_pano_at(new_point) and distance_between_panos(observer_position, new_point) < step_size:
+            new_point = None
 
     return new_point
 
@@ -109,34 +115,47 @@ def continue_along_path(prior_point, current_point):
     lon_track = current_point[3] - prior_point[3]
     current_track = np.arctan(lat_track / lon_track)
 
-    # Do not begin an iteration if the limit of searched locations has been met.
+    # Do not iterate beyond the limiting number of locations.
     if len(locations) <= locations_limit:
 
         # Determine some point ahead of the current position and track.
         # 'Ahead' here means some distance away in an arbitrary direction, 
         # but not in reverse along the current track.
-        for relative_bearing in [math.pi * 0.0/4.0, \
-                                 math.pi * 1.0/4.0, \
-                                 math.pi * 2.0/4.0, \
-                                 math.pi * 3.0/4.0, \
-                                 math.pi * 5.0/4.0, \
-                                 math.pi * 6.0/4.0, \
-                                 math.pi * 7.0/4.0]:
+
+        # In this case, I'm checking all angles from fore to aft
+        # along either side, in a fashion similar to breast stroke.
+        # Angles are checked every pi/4 radians.
+        # We do not consider checking panos in reverse.
+        for relative_bearing in [math.pi * 0.0/6.0, \
+                                 math.pi * 1.0/6.0, \
+                                 math.pi * 11.0/6.0, \
+                                 math.pi * 2.0/6.0, \
+                                 math.pi * 10.0/6.0, \
+                                 math.pi * 3.0/6.0, \
+                                 math.pi * 9.0/6.0, \
+                                 math.pi * 4.0/6.0, \
+                                 math.pi * 8.0/6.0]:
 
             some_new_direction_of_travel = some_point_to_relative_bearing(current_point, current_track, relative_bearing)
 
-
             # If there is a new direction of travel (excluding reverse), follow it.
             if there_exists_a_new_pano_at(some_new_direction_of_travel) and \
-                distance_between_panos(some_new_direction_of_travel, locations[0]) <= search_radius and \
-                distance_between_panos(some_new_direction_of_travel, current_point) <= step_size:
+                distance_between_panos(some_new_direction_of_travel, locations[0]) <= search_radius:
 
                 print('{}: heading {:.1f} from {:.5f}, {:.5f}'.format(len(locations), math.degrees(current_track), some_new_direction_of_travel[2], some_new_direction_of_travel[3]))
 
                 locations.append(some_new_direction_of_travel)
                 df = pd.DataFrame(some_new_direction_of_travel).T
                 df.to_csv('venture.csv', mode='a', header=False, index=False)
-                continue_along_path(current_point, some_new_direction_of_travel)
+
+                # If the change in track is great enough, mark the spot as a possible intersection.
+                if (relative_bearing/math.pi) in [(1.0/2.0), (3.0/2.0)]:
+                    locations[-1][4] = 1
+
+                if distance_between_panos(current_point, some_new_direction_of_travel) >= step_size:
+                    continue_along_path(current_point, some_new_direction_of_travel)
+                else:
+                    continue_along_path(prior_point, some_new_direction_of_travel)
 
     return None
 
@@ -154,7 +173,7 @@ def venture_outward_from_location(latitude, longitude):
     try:
         start_point = get_nearest_pano(coordinates)
     except ValueError:
-        print('*** failure at venture_outward_from_location(coordinates)')
+        print('*** failure at venture_outward_from_location({})'.format(coordinates))
 
     # Find another nearby panorama, B.
     next_point = some_point_to_relative_bearing(start_point, 0.0, 0.0)
@@ -170,26 +189,18 @@ def venture_outward_from_location(latitude, longitude):
 
 
 
+# Apply some switch-like feature to toggle between starting a new locations list and not.
+df = pd.DataFrame(locations, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
+df_name = 'venture.csv'
+df.to_csv(df_name, index=False)
 
-# Four Mile Creek
-#start_latitude = 40.049171
-#start_longitude = -105.250796
-
-start_latitude = 40.248040
-start_longitude = -74.062630
-
-# Continue from existing 'venture.csv' file
 #tail_point = pd.read_csv('venture.csv').tail(1)
 #start_latitude = tail_point.iloc[0][2]
 #start_longitude = tail_point.iloc[0][3]
 #locations = pd.read_csv('venture.csv').values.tolist()
 
+start_latitude = 40.246796
+start_longitude = -74.064312
 
 venture_outward_from_location(start_latitude, start_longitude)
-
-
-
-#df = pd.DataFrame(locations, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
-#df_name = 'venture.csv'
-#df.to_csv(df_name, index=False)
 
