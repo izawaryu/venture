@@ -1,10 +1,6 @@
 # Ryu Izawa
 # Written 2017-10-15
-# Last updated 2017-10-20
-
-# 
-# 
-# 
+# Last updated 2017-10-25
 
 
 import math
@@ -15,18 +11,21 @@ import numpy as np
 import pandas as pd
 import urllib, urllib2
 import tensorflow as tf
+import streetview as sv
 
 
 # Google Maps API Keys
 key = "&key=" + 'AIzaSyA_phpapSMniXBO2AfGjxp3ZfAD64wyh1s'	# Verdi
 #key = "&key=" + 'AIzaSyBXOIFAVM65wlaVsRjD-q6YnWQ4V0HpgZQ'	# Dreamfish
 save_location = './'
+target = 'ailanthus altissima'
 Size = '448x448'
-FoV = '15'
 step_size = 0.0001
-search_radius = 0.007
+search_radius = 0.02
 locations = []
-locations_limit = 1000
+observations = []
+locations_limit = 4500
+
 
 
 
@@ -101,6 +100,10 @@ def some_point_to_relative_bearing(observer_position, observer_track, relative_b
         coordinates_of_the_new_point = ('{},{}'.format(latitude_of_the_new_point, longitude_of_the_new_point))
         new_point = get_nearest_pano(coordinates_of_the_new_point)
 
+        # Record the direction of travel.
+        if new_point is not None:
+            new_point[4] = math.degrees(observer_track)
+
         if there_exists_a_new_pano_at(new_point) and distance_between_panos(observer_position, new_point) < step_size:
             new_point = None
 
@@ -113,7 +116,10 @@ def continue_along_path(prior_point, current_point):
 
     lat_track = current_point[2] - prior_point[2]
     lon_track = current_point[3] - prior_point[3]
-    current_track = np.arctan(lat_track / lon_track)
+    # When working with this trig, consider '0' often runs horizontally
+    # to the right in a conventional cartesian grid, with angles increasing counter-clockwise.
+    # We're using an absolute lat/lon grid, so '0' is geo-north and angles increase clockwise.
+    current_track = (math.atan2(lon_track,lat_track)+2*math.pi)%(2*math.pi)
 
     # Do not iterate beyond the limiting number of locations.
     if len(locations) <= locations_limit:
@@ -142,15 +148,27 @@ def continue_along_path(prior_point, current_point):
             if there_exists_a_new_pano_at(some_new_direction_of_travel) and \
                 distance_between_panos(some_new_direction_of_travel, locations[0]) <= search_radius:
 
-                print('{}: heading {:.1f} from {:.5f}, {:.5f}'.format(len(locations), math.degrees(current_track), some_new_direction_of_travel[2], some_new_direction_of_travel[3]))
+                print('{}: travelling {:3.0f} from {:.4f}, {:.4f}'.format(len(locations), math.degrees(current_track), some_new_direction_of_travel[2], some_new_direction_of_travel[3]))
 
                 locations.append(some_new_direction_of_travel)
                 df = pd.DataFrame(some_new_direction_of_travel).T
                 df.to_csv('venture.csv', mode='a', header=False, index=False)
 
-                # If the change in track is great enough, mark the spot as a possible intersection.
-                if (relative_bearing/math.pi) in [(1.0/2.0), (3.0/2.0)]:
-                    locations[-1][4] = 1
+                fore_view = int(round(math.degrees(current_track)))
+                fore_left = (fore_view - 75 + 360)%360
+                fore_right = (fore_view + 75 + 360)%360
+
+                rear_view = (fore_view + 180)%360
+                rear_left = (rear_view + 75 + 360)%360
+                rear_right = (rear_view - 75 + 360)%360
+
+                #examine_location(current_point[2], current_point[3], str(fore_view))
+                examine_location(current_point[2], current_point[3], str(fore_left))
+                examine_location(current_point[2], current_point[3], str(fore_right))
+
+                #examine_location(current_point[2], current_point[3], str(rear_view))
+                examine_location(current_point[2], current_point[3], str(rear_left))
+                examine_location(current_point[2], current_point[3], str(rear_right))
 
                 if distance_between_panos(current_point, some_new_direction_of_travel) >= step_size:
                     continue_along_path(current_point, some_new_direction_of_travel)
@@ -158,6 +176,33 @@ def continue_along_path(prior_point, current_point):
                     continue_along_path(prior_point, some_new_direction_of_travel)
 
     return None
+
+
+
+
+def examine_location(lat, lon, hdg):
+    # This function is used to test Google Street View images 
+    # for some target object or species.
+    # Each examination is added to the locations list 
+    # with its coordinates, direction and 
+    # the confidence level resulting from 
+    # a run through a given CNN neural net.
+
+    loc = '%.4f,%.4f' % (lat, lon)
+
+    if sv.useable_view_exists(coord=loc, heading=hdg):
+        in_view = sv.get_view(coord=loc, heading=hdg)
+        confidence = sv.suspected_presence(target, in_view)
+
+        if confidence > 0.01:
+            print('{}:     facing {} from {:.4f}, {:.4f}  ***  {:.2f} {}'.format(len(locations), hdg, lat, lon, confidence, target))
+            df = pd.DataFrame([lat, lon, hdg, confidence]).T
+            df.to_csv(target_file, mode='a', header=False, index=False)
+
+        return [lat, lon, hdg, confidence]
+
+    else:
+        return None
 
 
 
@@ -189,18 +234,19 @@ def venture_outward_from_location(latitude, longitude):
 
 
 
-# Apply some switch-like feature to toggle between starting a new locations list and not.
 df = pd.DataFrame(locations, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
 df_name = 'venture.csv'
 df.to_csv(df_name, index=False)
 
-#tail_point = pd.read_csv('venture.csv').tail(1)
-#start_latitude = tail_point.iloc[0][2]
-#start_longitude = tail_point.iloc[0][3]
-#locations = pd.read_csv('venture.csv').values.tolist()
+target_frame = pd.DataFrame(locations, columns=['latitude', 'longitude', 'heading', 'confidence'])
+target_name = target.split()
+target_name.append('csv')
+target_file = '.'.join(target_name)
+target_frame.to_csv(target_file, index=False)
 
-start_latitude = 40.246796
-start_longitude = -74.064312
+
+start_latitude = 40.366902
+start_longitude = -74.067603
 
 venture_outward_from_location(start_latitude, start_longitude)
 
