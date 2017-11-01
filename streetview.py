@@ -158,6 +158,7 @@ def suspected_presence(target_name, file_name):
     input_std = 128
     input_layer = "input"
     output_layer = "final_result"
+    conf = 0.0
 
     graph = load_graph(model_file)
     t = read_tensor_from_image_file(file_name, input_height=input_height, input_width=input_width, input_mean=input_mean, input_std=input_std)
@@ -175,6 +176,7 @@ def suspected_presence(target_name, file_name):
     labels = load_labels(label_file)
     for i in top_k:
         if labels[i]==target_name:
-            return results[i]
-        else:
-            return 0.0
+            conf = results[i]
+
+    return conf
+

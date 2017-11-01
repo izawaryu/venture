@@ -1,30 +1,32 @@
 # Ryu Izawa
 # Written 2017-10-15
-# Last updated 2017-10-25
+# Last updated 2017-10-31
 
 
+import csv
 import math
 import json
 import string
 import random
+import os.path
 import numpy as np
 import pandas as pd
 import urllib, urllib2
-import tensorflow as tf
-import streetview as sv
+
+
+
+start_latitude = 40.433183
+start_longitude = -74.199800
+
 
 
 # Google Maps API Keys
 key = "&key=" + 'AIzaSyA_phpapSMniXBO2AfGjxp3ZfAD64wyh1s'	# Verdi
 #key = "&key=" + 'AIzaSyBXOIFAVM65wlaVsRjD-q6YnWQ4V0HpgZQ'	# Dreamfish
-save_location = './'
-target = 'ailanthus altissima'
-Size = '448x448'
 step_size = 0.0001
-search_radius = 0.02
-locations = []
-observations = []
-locations_limit = 4500
+search_radius = 0.01
+locations=[]
+locations_limit = 100000
 
 
 
@@ -67,9 +69,12 @@ def there_exists_a_new_pano_at(some_location):
 
 def distance_between_panos(first_pano, second_pano):
 
-    scalar_distance = ((second_pano[2]-first_pano[2])**2 \
-                      + (second_pano[3]-first_pano[3])**2) \
-                      ** (1.0/2.0)
+    if second_pano is not None and first_pano is not None:
+        scalar_distance = ((second_pano[2]-first_pano[2])**2 \
+                          + (second_pano[3]-first_pano[3])**2) \
+                          ** (1.0/2.0)
+    else:
+        scalar_distance = 1
 
     return scalar_distance
 
@@ -145,64 +150,26 @@ def continue_along_path(prior_point, current_point):
             some_new_direction_of_travel = some_point_to_relative_bearing(current_point, current_track, relative_bearing)
 
             # If there is a new direction of travel (excluding reverse), follow it.
-            if there_exists_a_new_pano_at(some_new_direction_of_travel) and \
-                distance_between_panos(some_new_direction_of_travel, locations[0]) <= search_radius:
+            if distance_between_panos(some_new_direction_of_travel, start_point) <= search_radius and \
+                some_new_direction_of_travel is not None:
 
-                print('{}: travelling {:3.0f} from {:.4f}, {:.4f}'.format(len(locations), math.degrees(current_track), some_new_direction_of_travel[2], some_new_direction_of_travel[3]))
+                if there_exists_a_new_pano_at(some_new_direction_of_travel):
 
-                locations.append(some_new_direction_of_travel)
-                df = pd.DataFrame(some_new_direction_of_travel).T
-                df.to_csv('venture.csv', mode='a', header=False, index=False)
+                    locations.append(some_new_direction_of_travel)
+                    df = pd.DataFrame(some_new_direction_of_travel).T
+                    df.to_csv('venture.csv', mode='a', header=False, index=False)
 
-                fore_view = int(round(math.degrees(current_track)))
-                fore_left = (fore_view - 75 + 360)%360
-                fore_right = (fore_view + 75 + 360)%360
+                    print('{}: travelling {:3.0f} from {:.4f}, {:.4f}'.format(len(locations), math.degrees(current_track), some_new_direction_of_travel[2], some_new_direction_of_travel[3]))
 
-                rear_view = (fore_view + 180)%360
-                rear_left = (rear_view + 75 + 360)%360
-                rear_right = (rear_view - 75 + 360)%360
-
-                #examine_location(current_point[2], current_point[3], str(fore_view))
-                examine_location(current_point[2], current_point[3], str(fore_left))
-                examine_location(current_point[2], current_point[3], str(fore_right))
-
-                #examine_location(current_point[2], current_point[3], str(rear_view))
-                examine_location(current_point[2], current_point[3], str(rear_left))
-                examine_location(current_point[2], current_point[3], str(rear_right))
-
-                if distance_between_panos(current_point, some_new_direction_of_travel) >= step_size:
-                    continue_along_path(current_point, some_new_direction_of_travel)
-                else:
-                    continue_along_path(prior_point, some_new_direction_of_travel)
+                    if distance_between_panos(current_point, some_new_direction_of_travel) >= step_size:
+                        continue_along_path(current_point, some_new_direction_of_travel)
+                    else:
+                        continue_along_path(prior_point, some_new_direction_of_travel)
 
     return None
 
 
 
-
-def examine_location(lat, lon, hdg):
-    # This function is used to test Google Street View images 
-    # for some target object or species.
-    # Each examination is added to the locations list 
-    # with its coordinates, direction and 
-    # the confidence level resulting from 
-    # a run through a given CNN neural net.
-
-    loc = '%.4f,%.4f' % (lat, lon)
-
-    if sv.useable_view_exists(coord=loc, heading=hdg):
-        in_view = sv.get_view(coord=loc, heading=hdg)
-        confidence = sv.suspected_presence(target, in_view)
-
-        if confidence > 0.01:
-            print('{}:     facing {} from {:.4f}, {:.4f}  ***  {:.2f} {}'.format(len(locations), hdg, lat, lon, confidence, target))
-            df = pd.DataFrame([lat, lon, hdg, confidence]).T
-            df.to_csv(target_file, mode='a', header=False, index=False)
-
-        return [lat, lon, hdg, confidence]
-
-    else:
-        return None
 
 
 
@@ -212,19 +179,37 @@ def venture_outward_from_location(latitude, longitude):
     # Starting at a given location,
     # move outward along paths of extisting GSV panoramas.
 
+    if os.path.isfile('./venture.csv'):
+        with open('venture.csv', 'rb') as v:
+            reader = csv.reader(v)
+            locations = list(reader)
+            latitude = locations[-1][2]
+            longitude = locations[-1][3]
+    else:
+        locations=[]
+        df = pd.DataFrame(locations, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
+        df.to_csv('venture.csv', index=False)
+
     coordinates = ('{},{}'.format(latitude, longitude))
 
-    # Find the nearest panorama to the starting point, A.
     try:
+        # Find the nearest panorama to the starting point, A.
+        global start_point
         start_point = get_nearest_pano(coordinates)
+        # Find another nearby panorama, B.
+        next_point = some_point_to_relative_bearing(start_point, 0.0, 0.0)
     except ValueError:
         print('*** failure at venture_outward_from_location({})'.format(coordinates))
 
-    # Find another nearby panorama, B.
-    next_point = some_point_to_relative_bearing(start_point, 0.0, 0.0)
 
     locations.append(start_point)
+    sp = pd.DataFrame(start_point).T
+    sp.to_csv('venture.csv', mode='a', header=False, index=False)
+
     locations.append(next_point)
+    np = pd.DataFrame(next_point).T
+    np.to_csv('venture.csv', mode='a', header=False, index=False)
+
 
     continue_along_path(start_point, next_point)
 
@@ -234,19 +219,12 @@ def venture_outward_from_location(latitude, longitude):
 
 
 
-df = pd.DataFrame(locations, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
-df_name = 'venture.csv'
-df.to_csv(df_name, index=False)
-
-target_frame = pd.DataFrame(locations, columns=['latitude', 'longitude', 'heading', 'confidence'])
-target_name = target.split()
-target_name.append('csv')
-target_file = '.'.join(target_name)
-target_frame.to_csv(target_file, index=False)
 
 
-start_latitude = 40.366902
-start_longitude = -74.067603
+
+
+
+
 
 venture_outward_from_location(start_latitude, start_longitude)
 
