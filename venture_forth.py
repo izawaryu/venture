@@ -1,6 +1,6 @@
 # Ryu Izawa
 # Written 2017-10-15
-# Last updated 2017-11-04
+# Last updated 2017-11-05
 
 
 import csv
@@ -15,8 +15,10 @@ import urllib, urllib2
 
 
 
-start_latitude = 40.355606
-start_longitude = -74.027081
+start_latitude = 40.363377
+start_longitude = -74.013535
+start_latitude = None
+start_longitude = None
 
 
 
@@ -24,7 +26,7 @@ start_longitude = -74.027081
 key = "&key=" + 'AIzaSyA_phpapSMniXBO2AfGjxp3ZfAD64wyh1s'	# Verdi
 #key = "&key=" + 'AIzaSyBXOIFAVM65wlaVsRjD-q6YnWQ4V0HpgZQ'	# Dreamfish
 step_size = 0.0001
-search_radius = 0.0500
+search_radius = 0.0100
 locations_limit = 100000
 trail = []
 forks = []
@@ -178,7 +180,7 @@ def travel_along_path(prior_point, current_point):
 
 
 
-def venture_forth(latitude, longitude):
+def venture_forth(lat=None, lon=None):
 
     # Starting at a given location,
     # move outward along paths of extisting GSV panoramas.
@@ -186,31 +188,34 @@ def venture_forth(latitude, longitude):
     global trail
     global start_point
 
+
     if os.path.isfile('./venture.csv'):
-        with open('venture.csv', 'rb') as v:
-            reader = csv.reader(v)
-            trail = list(reader)
-            latitude = trail[-1][2]
-            longitude = trail[-1][3]
+        trail = pd.read_csv('./venture.csv').values.tolist()
+
     else:
         df = pd.DataFrame(trail, columns=['date', 'pano_id', 'latitude', 'longitude', 'comment'])
         df.to_csv('venture.csv', index=False)
 
-    coordinates = ('{},{}'.format(latitude, longitude))
 
-    try:
+    if lat is None and lon is None:
+        start_point = trail[1]
+        next_point = trail[-1]
+        last_point = trail[-2]
+        this_point = trail[-1]
+
+    else:
+        coordinates = ('{},{}'.format(lat, lon))
         start_point = last_point = get_nearest_pano(coordinates)
         next_point = this_point = next_step(start_point, 0.0)
-    except:
-        print '*** No pano found at starting point ***'
 
-    trail.append(start_point)
-    sp = pd.DataFrame(list(start_point)).T
-    sp.to_csv('venture.csv', mode='a', header=False, index=False)
+        trail.append(start_point)
+        sp = pd.DataFrame(list(start_point)).T
+        sp.to_csv('venture.csv', mode='a', header=False, index=False)
 
-    trail.append(next_point)
-    np = pd.DataFrame(list(next_point)).T
-    np.to_csv('venture.csv', mode='a', header=False, index=False)
+        trail.append(next_point)
+        np = pd.DataFrame(list(next_point)).T
+        np.to_csv('venture.csv', mode='a', header=False, index=False)
+
 
     while len(trail) <= locations_limit:
 
@@ -221,12 +226,9 @@ def venture_forth(latitude, longitude):
         df.to_csv('venture.csv', mode='a', header=False, index=False)
         print('{}: {:.4f} ; {:.4f} heading {:3.0f}  {}'.format(len(trail), this_point[2], this_point[3], this_point[4], this_point[1]))
 
-    print [pt[1] for pt in forks]
+
     print '*** DONE VENTURING ***'
 
 
 
-
-
 venture_forth(start_latitude, start_longitude)
-
